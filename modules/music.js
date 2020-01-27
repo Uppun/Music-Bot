@@ -11,7 +11,9 @@ function playSong(queue, guildId) {
 
     const dispatcher = queue[guildId].connection.playStream(ytdl(song.url))
         .on('end', () => {
+            console.log('music ended')
             queue[guildId].songs.shift();
+            console.log(`starting song ${queue[guildId].songs[0]}`)
             playSong(queue, guildId);
         })
         .on('error', () => {
@@ -69,6 +71,29 @@ class MusicModule {
                 }
             } else {
                 message.channel.send('You need to be in a voice channel to add songs!');
+            }
+        });
+
+        this.dispatch.hook('?skip', message => {
+            const serverQueue = this.queue[message.guild.id];
+            const voiceChannel = message.member.voiceChannel;
+            if (voiceChannel) {
+                if (serverQueue) {
+                    console.log(serverQueue.connection.dispatcher)
+                    serverQueue.connection.dispatcher.end();
+                } else {
+                    message.channel.send('W-what am I supposed to skip?');
+                }
+            } else {
+                message.channel.send('You need to be in a voice channel to skip!');
+            }
+        });
+
+        this.dispatch.hook('?end', message => {
+            const guildId = message.guild.id;
+            if(message.member.voiceChannel && this.queue[guildId]) {
+                this.queue[guildId].songs = [];
+                this.queue[guildId].connection.dispatcher.end();
             }
         });
     }
