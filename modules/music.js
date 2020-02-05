@@ -1,4 +1,5 @@
 const ytdl = require('ytdl-core');
+const Discord = require('discord.js');
 
 
 function playSong(queue, guildId) {
@@ -30,7 +31,7 @@ class MusicModule {
         this.client = context.client;
         this.queue = {};
 
-        this.dispatch.hook('?play', async message => {
+        this.dispatch.hook('$play', async message => {
             const args = message.content.split(' ');
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
@@ -38,9 +39,12 @@ class MusicModule {
                 const permissions = voiceChannel.permissionsFor(this.client.user);
                 if (permissions.has('CONNECT') && permissions.has('SPEAK')) {
                     const songInfo = await ytdl.getInfo(args[1]);
+                    const response = songInfo.player_response;
+
                     const song = {
                         title: songInfo.title,
                         url: songInfo.video_url,
+                        videoDetails: response.videoDetails,
                     };
 
                     if (!this.queue[guildId]) {
@@ -74,7 +78,7 @@ class MusicModule {
             }
         });
 
-        this.dispatch.hook('?skip', message => {
+        this.dispatch.hook('$skip', message => {
             const serverQueue = this.queue[message.guild.id];
             const voiceChannel = message.member.voiceChannel;
             if (voiceChannel) {
@@ -89,12 +93,37 @@ class MusicModule {
             }
         });
 
-        this.dispatch.hook('?end', message => {
+        this.dispatch.hook('$end', message => {
             const guildId = message.guild.id;
             if(message.member.voiceChannel && this.queue[guildId]) {
                 this.queue[guildId].songs = [];
                 this.queue[guildId].connection.dispatcher.end();
             }
+        });
+
+        this.dispatch.hook('$np', message => {
+            const guildId = message.guild.id;
+            const np = this.queue[guildId].songs[0];
+            if (np) {
+                const {videoDetails, url} = np;
+                const npEmbed = new Discord.RichEmbed()
+                    .setTitle(videoDetails.title)
+                    .setDescription(videoDetails.shortDescription)
+                    .setURL(url)
+                    .setThumbnail(videoDetails.thumbnail.thumbnails[0].url)
+                    .setAuthor(videoDetails.author);
+                message.channel.send(npEmbed);
+            }
+        });
+
+        this.dispatch.hook('$queue', message => {
+            const guildId = message.guild.id;
+            const songs = this.queue[guildId].songs;
+            let msg = ``;
+            for (let i = 0; i < songs.length; i++) {
+                msg += `${i + 1}) ${songs[i].videoDetails.title}\n`;
+            }
+            message.channel.send(msg);
         });
     }
 }
