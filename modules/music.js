@@ -42,7 +42,7 @@ class MusicModule {
                     const response = songInfo.player_response;
 
                     const song = {
-                        title: songInfo.title,
+                        title: Discord.Util.escapeMarkdown(songInfo.title),
                         url: songInfo.video_url,
                         videoDetails: response.videoDetails,
                     };
@@ -113,6 +113,28 @@ class MusicModule {
                     .setThumbnail(videoDetails.thumbnail.thumbnails[0].url)
                     .setAuthor(videoDetails.author);
                 message.channel.send(npEmbed);
+            }
+        });
+
+        this.dispatch.hook('$pause', message => {
+            const guildId = message.guild.id;
+            if (this.queue[guildId].playing) {
+                this.queue[guildId].playing = false;
+                this.queue[guildId].connection.dispatcher.pause();
+                message.channel.send('Pausing song.');
+            } else {
+                message.channel.send('There is nothing playing for me to pause!');
+            }
+        });
+
+        this.dispatch.hook('$resume', message => {
+            const guildId = message.guild.id;
+            if (!this.queue[guildId].playing && this.queue[guildId].songs[0]) {
+                this.queue[guildId].playing = true;
+                this.queue[guildId].connection.dispatcher.resume();
+                message.channel.send('Resuming song.');
+            } else {
+                message.channel.send('I don\'t have anything to resume right now.');
             }
         });
 
