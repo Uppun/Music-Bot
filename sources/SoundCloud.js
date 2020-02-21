@@ -2,11 +2,11 @@ const url = require('url');
 
 class SoundCloud {
     match(link) {
-        const parse = url.parseUrl(link);
+        const parse = parseUrl(link);
         return parse.hostname === 'snd.sc' || /(www\.)?soundcloud\.com/.test(String(parse.hostname));
     }
 
-    getSong(link, config) {
+    obtainSong(link, config) {
         const key = config.get('soundcloud-key');
 
         if (!key) {

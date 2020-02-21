@@ -1,12 +1,15 @@
-const YouTube = require('./handlers/YouTube.js');
-const SoundCloud = require('./handlers/SoundCloud.js');
+const YouTube = require('./sources/YouTube.js');
+const SoundCloud = require('./sources/SoundCloud.js');
 
 const sources = [YouTube, SoundCloud];
 
-export default function findSource(link, config) {
+async function findSource(link, config) {
     for (const source of sources) {
-        if (source.match(link)) {
-            return source.getSong(link);
+        const handler = new source();
+        if (handler.match(link)) {
+            return await handler.obtainSong(link, config);
         }
     }
 }
+
+module.exports = findSource;

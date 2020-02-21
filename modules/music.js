@@ -1,5 +1,6 @@
 const ytdl = require('ytdl-core');
 const Discord = require('discord.js');
+const urlParser = require('../urlParser.js');
 
 
 function playSong(queue, guildId) {
@@ -10,7 +11,7 @@ function playSong(queue, guildId) {
         return;
     }
 
-    const dispatcher = queue[guildId].connection.playStream(ytdl(song.url))
+    const dispatcher = queue[guildId].connection.playStream(song.getSong())
         .on('end', () => {
             console.log('music ended')
             queue[guildId].songs.shift();
@@ -38,37 +39,31 @@ class MusicModule {
             if(voiceChannel) {
                 const permissions = voiceChannel.permissionsFor(this.client.user);
                 if (permissions.has('CONNECT') && permissions.has('SPEAK')) {
-                    const songInfo = await ytdl.getInfo(args[1]);
-                    const response = songInfo.player_response;
-
-                    const song = {
-                        title: Discord.Util.escapeMarkdown(songInfo.title),
-                        url: songInfo.video_url,
-                        videoDetails: response.videoDetails,
-                    };
-
-                    if (!this.queue[guildId]) {
-                        this.queue[guildId] = {
-                            textChannel: message.channel,
-                            voiceChannel,
-                            connection: null,
-                            songs: [],
-                            volume: 5,
-                            playing: true,
-                        };
-
-                        this.queue[guildId].songs.push(song);
-
-                        try {
-                            let connection = await voiceChannel.join();
-                            this.queue[message.guild.id].connection = connection;
-                            playSong(this.queue, guildId);
-                        } catch (err) {
-                            console.log(err);
+                    const song = await urlParser(args[1]);
+                    if (song) {
+                        if (!this.queue[guildId]) {
+                            this.queue[guildId] = {
+                                textChannel: message.channel,
+                                voiceChannel,
+                                connection: null,
+                                songs: [],
+                                volume: 5,
+                                playing: true,
+                            };
+    
+                            this.queue[guildId].songs.push(song);
+    
+                            try {
+                                let connection = await voiceChannel.join();
+                                this.queue[message.guild.id].connection = connection;
+                                playSong(this.queue, guildId);
+                            } catch (err) {
+                                console.log(err);
+                            }
+                        } else {
+                            this.queue[guildId].songs.push(song);
+                            message.channel.send(`${song.title} has been added to the queue!`);
                         }
-                    } else {
-                        this.queue[guildId].songs.push(song);
-                        message.channel.send(`${song.title} has been added to the queue!`);
                     }
                 } else {
                     message.channel.send('I do not have the permissions to join that voice channel and play music!');
@@ -105,7 +100,8 @@ class MusicModule {
             const guildId = message.guild.id;
             const np = this.queue[guildId].songs[0];
             if (np) {
-                const {videoDetails, url} = np;
+                const videoDetails = np.getInfo();
+                const url = np.getUrl();
                 const npEmbed = new Discord.RichEmbed()
                     .setTitle(videoDetails.title)
                     .setDescription(videoDetails.shortDescription)
@@ -143,7 +139,7 @@ class MusicModule {
             const songs = this.queue[guildId].songs;
             let msg = ``;
             for (let i = 0; i < songs.length; i++) {
-                msg += `${i + 1}) ${songs[i].videoDetails.title}\n`;
+                msg += `${i + 1}) ${songs[i].getInfo().title}\n`;
             }
             message.channel.send(msg);
         });
