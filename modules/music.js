@@ -3,7 +3,7 @@ const Discord = require('discord.js');
 const urlParser = require('../urlParser.js');
 
 
-function playSong(queue, guildId) {
+async function playSong(queue, guildId) {
     const song = queue[guildId].songs[0];
     if (!song) {
         queue[guildId].voiceChannel.leave();
@@ -11,7 +11,7 @@ function playSong(queue, guildId) {
         return;
     }
 
-    const dispatcher = queue[guildId].connection.playStream(song.getSong())
+    const dispatcher = queue[guildId].connection.playStream(await song.getSong())
         .on('end', () => {
             console.log('music ended')
             queue[guildId].songs.shift();
@@ -39,7 +39,8 @@ class MusicModule {
             if(voiceChannel) {
                 const permissions = voiceChannel.permissionsFor(this.client.user);
                 if (permissions.has('CONNECT') && permissions.has('SPEAK')) {
-                    const song = await urlParser(args[1]);
+                    const song = await urlParser(args[1], this.config);
+                    console.log(song)
                     if (song) {
                         if (!this.queue[guildId]) {
                             this.queue[guildId] = {
@@ -100,14 +101,14 @@ class MusicModule {
             const guildId = message.guild.id;
             const np = this.queue[guildId].songs[0];
             if (np) {
-                const videoDetails = np.getInfo();
+                const info = np.getInfo();
                 const url = np.getUrl();
                 const npEmbed = new Discord.RichEmbed()
-                    .setTitle(videoDetails.title)
-                    .setDescription(videoDetails.shortDescription)
+                    .setTitle(info.title)
+                    .setDescription(info.description)
                     .setURL(url)
-                    .setThumbnail(videoDetails.thumbnail.thumbnails[0].url)
-                    .setAuthor(videoDetails.author);
+                    .setThumbnail(info.thumbnail)
+                    .setAuthor(info.author);
                 message.channel.send(npEmbed);
             }
         });
