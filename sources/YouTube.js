@@ -12,18 +12,15 @@ class YouTube {
     async obtainSong(link, config) {
         const songInfo = await ytdl.getInfo(link);
         const response = songInfo.player_response.videoDetails;
-
         return new Song(
             Discord.Util.escapeMarkdown(songInfo.title),
             songInfo.video_url,
             {
-                tite: response.title,
                 description: response.shortDescription,
                 thumbnail: response.thumbnail.thumbnails[0].url,
                 author: response.author, 
             },
-            songInfo.video_url,
-            (url) => ytdl(url)
+            () => ytdl(songInfo.video_url)
         );
     }
 }

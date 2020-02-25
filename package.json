@@ -6,6 +6,7 @@
     "node-fetch": "^2.6.0",
     "opusscript": "0.0.7",
     "querystring": "^0.2.0",
+    "yt-search": "^1.1.2",
     "ytdl-core": "^1.0.7"
   }
 }

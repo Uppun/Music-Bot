@@ -34,21 +34,17 @@ class SoundCloud {
                     if (!data.stream_url) throw new Error('No stream URL found');
 
                     return new Song(
-                        data.title,
+                        Discord.Util.escapeMarkdown(data.title),
                         data.permalink_url,
                         {
-                            title: data.title,
                             description: data.title,
                             thumbnail: data.artwork_url || data.user.avatar_url,
                             author: data.user.username,
                         },
-                        data.stream_url,
-                        (url) => {
-                            const streamURL = new URL(url);
+                        () => {
+                            const streamURL = new URL(data.stream_url);
                             streamURL.search = qs.stringify({client_id: key});
-                            console.log(streamURL)
                             return fetch(streamURL.href).then(res => {
-                                console.log(res.body)
                                 return res.body;
                             });
                         }

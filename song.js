@@ -1,8 +1,7 @@
 class Song {
-    constructor(title, url, info, streamUrl, songFunc) {
+    constructor(title, url, info, songFunc) {
         this.title = title;
         this.url = url;
-        this.streamUrl = streamUrl;
         this.info = info;
         this.songFunc = songFunc;
     }
@@ -20,7 +19,7 @@ class Song {
     }
 
     getSong() {
-        return this.songFunc(this.streamUrl);
+        return this.songFunc();
     }
 }
 

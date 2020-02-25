@@ -1,6 +1,7 @@
 const ytdl = require('ytdl-core');
 const Discord = require('discord.js');
 const urlParser = require('../urlParser.js');
+const yts = require('yt-search');
 
 
 async function playSong(queue, guildId) {
@@ -31,62 +32,49 @@ class MusicModule {
         this.config = context.config;
         this.client = context.client;
         this.queue = {};
+        this.searchResults = [];
 
         this.dispatch.hook('$play', async message => {
             const args = message.content.split(' ');
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
-            if(voiceChannel) {
-                const permissions = voiceChannel.permissionsFor(this.client.user);
-                if (permissions.has('CONNECT') && permissions.has('SPEAK')) {
-                    const song = await urlParser(args[1], this.config);
-                    console.log(song)
-                    if (song) {
-                        if (!this.queue[guildId]) {
-                            this.queue[guildId] = {
-                                textChannel: message.channel,
-                                voiceChannel,
-                                connection: null,
-                                songs: [],
-                                volume: 5,
-                                playing: true,
-                            };
-    
-                            this.queue[guildId].songs.push(song);
-    
-                            try {
-                                let connection = await voiceChannel.join();
-                                this.queue[message.guild.id].connection = connection;
-                                playSong(this.queue, guildId);
-                            } catch (err) {
-                                console.log(err);
-                            }
-                        } else {
-                            this.queue[guildId].songs.push(song);
-                            message.channel.send(`${song.title} has been added to the queue!`);
-                        }
+            if (!voiceChannel) return message.channel.send('You need to be in a voice channel to add songs!');
+            const permissions = voiceChannel.permissionsFor(this.client.user);
+            if (!permissions.has('CONNECT') || permissions.has('SPEAK')) return message.channel.send('I do not have the permissions to join that voice channel and play music!');
+            const song = await urlParser(args[1], this.config);
+            if (song) {
+                if (!this.queue[guildId]) {
+                    this.queue[guildId] = {
+                        textChannel: message.channel,
+                        voiceChannel,
+                        connection: null,
+                        songs: [],
+                        volume: 5,
+                        playing: true,
+                    };
+
+                    this.queue[guildId].songs.push(song);
+
+                    try {
+                        let connection = await voiceChannel.join();
+                        this.queue[message.guild.id].connection = connection;
+                        playSong(this.queue, guildId);
+                    } catch (err) {
+                        console.log(err);
                     }
                 } else {
-                    message.channel.send('I do not have the permissions to join that voice channel and play music!');
+                    this.queue[guildId].songs.push(song);
+                    message.channel.send(`${song.title} has been added to the queue!`);
                 }
-            } else {
-                message.channel.send('You need to be in a voice channel to add songs!');
             }
         });
 
         this.dispatch.hook('$skip', message => {
             const serverQueue = this.queue[message.guild.id];
             const voiceChannel = message.member.voiceChannel;
-            if (voiceChannel) {
-                if (serverQueue) {
-                    console.log(serverQueue.connection.dispatcher)
-                    serverQueue.connection.dispatcher.end();
-                } else {
-                    message.channel.send('W-what am I supposed to skip?');
-                }
-            } else {
-                message.channel.send('You need to be in a voice channel to skip!');
-            }
+            if (!voiceChannel) return message.channel.send('You need to be in a voice channel to skip!');
+            if (!serverQueue) return message.channel.send('W-what am I supposed to skip?');
+            serverQueue.connection.dispatcher.end();
         });
 
         this.dispatch.hook('$end', message => {
@@ -104,7 +92,7 @@ class MusicModule {
                 const info = np.getInfo();
                 const url = np.getUrl();
                 const npEmbed = new Discord.RichEmbed()
-                    .setTitle(info.title)
+                    .setTitle(np.getTitle())
                     .setDescription(info.description)
                     .setURL(url)
                     .setThumbnail(info.thumbnail)
@@ -115,24 +103,34 @@ class MusicModule {
 
         this.dispatch.hook('$pause', message => {
             const guildId = message.guild.id;
-            if (this.queue[guildId].playing) {
-                this.queue[guildId].playing = false;
-                this.queue[guildId].connection.dispatcher.pause();
-                message.channel.send('Pausing song.');
-            } else {
-                message.channel.send('There is nothing playing for me to pause!');
-            }
+            if (!this.queue[guildId].playing) return message.channel.send('There is nothing playing for me to pause!');
+            this.queue[guildId].playing = false;
+            this.queue[guildId].connection.dispatcher.pause();
+            message.channel.send('Pausing song.');
         });
 
         this.dispatch.hook('$resume', message => {
             const guildId = message.guild.id;
-            if (!this.queue[guildId].playing && this.queue[guildId].songs[0]) {
-                this.queue[guildId].playing = true;
-                this.queue[guildId].connection.dispatcher.resume();
-                message.channel.send('Resuming song.');
-            } else {
-                message.channel.send('I don\'t have anything to resume right now.');
+            if (this.queue[guildId].playing || !this.queue[guildId].songs[0]) return message.channel.send('I don\'t have anything to resume right now.');
+            this.queue[guildId].playing = true;
+            this.queue[guildId].connection.dispatcher.resume();
+            message.channel.send('Resuming song.');
+        });
+
+        this.dispatch.hook('$search', async message => {
+            const searchTerms = message.content.substring('$search'.length, message.length).trim();
+            const { videos } = await yts(searchTerms);
+            const videoNum = videos.length > 10 ? 10 : videos.length;
+            let entries = '';
+            for (let i = 0; i < videoNum; i++) {
+                this.searchResults.push(videos[i]);
+                entries += (`${i+1}) ${videos[i].title} [${videos[i].timestamp}] | ${videos[i].author.name}\n`);
             }
+
+            const searchEmbed = new Discord.RichEmbed()
+                .setTitle(`${searchTerms} results`)
+                .setDescription(entries);
+            message.channel.send(searchEmbed);
         });
 
         this.dispatch.hook('$queue', message => {
