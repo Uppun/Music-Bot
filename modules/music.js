@@ -60,6 +60,7 @@ class MusicModule {
         this.dispatch = context.dispatch;
         this.config = context.config;
         this.client = context.client;
+        this.searcher = null;
         this.queue = {};
         this.searchResults = [];
 
@@ -72,6 +73,30 @@ class MusicModule {
             const permissions = voiceChannel.permissionsFor(this.client.user);
             if (!permissions.has('CONNECT') || !permissions.has('SPEAK')) return message.channel.send('I do not have the permissions to join that voice channel and play music!');
             addSong(args[1], this.queue, this.config, voiceChannel, guildId, textChannel);
+        });
+
+        this.dispatch.hook(null, async message => {
+            const voiceChannel = message.member.voiceChannel;
+            const guildId = message.guild.id;
+            const textChannel = message.channel;
+            if (!this.searcher) {
+                return;
+            }
+
+            if (message.author.id === this.searcher) {
+                if (!voiceChannel) return textChannel.send('You need to be in a voice channel to add songs!');
+                const selection = message.content;
+                if (selection.match(/[1-9]|10/)) {
+                    const index = parseInt(selection, 10);
+                    if (index > this.searchResults.length) {
+                        message.channel.send('That song doesn\'t exist!');
+                        return;
+                    }
+                    addSong(this.searchResults[index].url, this.queue, this.config, voiceChannel, guildId, textChannel);
+                    this.searcher = null;
+                    this.searchResults = [];
+                }
+            }
         });
 
         this.dispatch.hook('$skip', message => {
@@ -126,6 +151,7 @@ class MusicModule {
             const searchTerms = message.content.substring('$search'.length, message.length).trim();
             const { videos } = await yts(searchTerms);
             const videoNum = videos.length > 10 ? 10 : videos.length;
+            this.searcher = message.author.id;
             let entries = '';
             for (let i = 0; i < videoNum; i++) {
                 this.searchResults.push(videos[i]);
