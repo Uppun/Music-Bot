@@ -26,6 +26,35 @@ async function playSong(queue, guildId) {
     dispatcher.setVolumeLogarithmic(queue[guildId].volume/5);
 }
 
+async function addSong(link, queue, config, voiceChannel, guildId, textChannel) {
+    const song = await urlParser(link, config);
+    if (song) {
+        if (!queue[guildId]) {
+            queue[guildId] = {
+                textChannel,
+                voiceChannel,
+                connection: null,
+                songs: [],
+                volume: 5, 
+                playing: true,
+            };
+
+            queue[guildId].songs.push(song);
+
+            try {
+                let connection = await voiceChannel.join();
+                queue[guildId].connection = connection;
+                playSong(queue, guildId);
+            } catch (err) {
+                console.log(err)
+            }
+        } else {
+            queue[guildId].songs.push(song);
+        }
+        textChannel.send(`${song.title} added to queue!`);
+    }
+}
+
 class MusicModule {
     constructor(context) {
         this.dispatch = context.dispatch;
@@ -38,35 +67,11 @@ class MusicModule {
             const args = message.content.split(' ');
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
-            if (!voiceChannel) return message.channel.send('You need to be in a voice channel to add songs!');
+            const textChannel = message.channel;
+            if (!voiceChannel) return textChannel.send('You need to be in a voice channel to add songs!');
             const permissions = voiceChannel.permissionsFor(this.client.user);
-            if (!permissions.has('CONNECT') || permissions.has('SPEAK')) return message.channel.send('I do not have the permissions to join that voice channel and play music!');
-            const song = await urlParser(args[1], this.config);
-            if (song) {
-                if (!this.queue[guildId]) {
-                    this.queue[guildId] = {
-                        textChannel: message.channel,
-                        voiceChannel,
-                        connection: null,
-                        songs: [],
-                        volume: 5,
-                        playing: true,
-                    };
-
-                    this.queue[guildId].songs.push(song);
-
-                    try {
-                        let connection = await voiceChannel.join();
-                        this.queue[message.guild.id].connection = connection;
-                        playSong(this.queue, guildId);
-                    } catch (err) {
-                        console.log(err);
-                    }
-                } else {
-                    this.queue[guildId].songs.push(song);
-                    message.channel.send(`${song.title} has been added to the queue!`);
-                }
-            }
+            if (!permissions.has('CONNECT') || !permissions.has('SPEAK')) return message.channel.send('I do not have the permissions to join that voice channel and play music!');
+            addSong(args[1], this.queue, this.config, voiceChannel, guildId, textChannel);
         });
 
         this.dispatch.hook('$skip', message => {
