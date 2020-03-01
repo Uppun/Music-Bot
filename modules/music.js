@@ -5,6 +5,7 @@ const ytpl = require('ytpl');
 
 
 async function playSong(queue, guildId) {
+    clearTimeout(queue[guildId].timer);
     const song = queue[guildId].songs[0];
     if (!song) {
         queue[guildId].playing = false;
@@ -15,7 +16,6 @@ async function playSong(queue, guildId) {
         return;
     }
 
-    clearTimeout(queue[guildId].timer);
     const dispatcher = queue[guildId].connection.playStream(await song.getSong())
         .on('end', () => {
             console.log('music ended')
