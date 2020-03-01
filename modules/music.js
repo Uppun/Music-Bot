@@ -1,7 +1,7 @@
-const ytdl = require('ytdl-core');
 const Discord = require('discord.js');
 const urlParser = require('../urlParser.js');
 const yts = require('yt-search');
+const ytpl = require('ytpl');
 
 
 async function playSong(queue, guildId) {
@@ -51,7 +51,8 @@ async function addSong(link, queue, config, voiceChannel, guildId, textChannel) 
         } else {
             queue[guildId].songs.push(song);
         }
-        textChannel.send(`${song.title} added to queue!`);
+
+        return song.title;
     }
 }
 
@@ -72,7 +73,22 @@ class MusicModule {
             if (!voiceChannel) return textChannel.send('You need to be in a voice channel to add songs!');
             const permissions = voiceChannel.permissionsFor(this.client.user);
             if (!permissions.has('CONNECT') || !permissions.has('SPEAK')) return message.channel.send('I do not have the permissions to join that voice channel and play music!');
-            addSong(args[1], this.queue, this.config, voiceChannel, guildId, textChannel);
+            const url = new URL(args[1]);
+            if (url.pathname === '/playlist' && url.searchParams.has('list')) {
+                const playlistId = url.searchParams.get('list');
+                ytpl(playlistId, (err, playlist) => {
+                    if (err) throw err;
+                    const songs = playlist['items'];
+                    for (const song of songs) {
+                        addSong(song.url_simple, this.queue, this.config, voiceChannel, guildId, textChannel);
+                    }
+                    textChannel.send('Playlist added to queue!');
+                    return;
+                });
+            } else {
+                const title = addSong(args[1], this.queue, this.config, voiceChannel, guildId, textChannel);
+                textChannel.send(`${title} added to queue!`);
+            }
         });
 
         this.dispatch.hook(null, async message => {
