@@ -7,11 +7,15 @@ const ytpl = require('ytpl');
 async function playSong(queue, guildId) {
     const song = queue[guildId].songs[0];
     if (!song) {
-        queue[guildId].voiceChannel.leave();
-        delete queue[guildId];
+        queue[guildId].playing = false;
+        queue[guildId].timer = setTimeout(() => {
+            queue[guildId].voiceChannel.leave();
+            delete queue[guildId];
+        }, 600000);
         return;
     }
 
+    clearTimeout(queue[guildId].timer);
     const dispatcher = queue[guildId].connection.playStream(await song.getSong())
         .on('end', () => {
             console.log('music ended')
@@ -37,6 +41,7 @@ async function addSong(link, queue, config, voiceChannel, guildId, textChannel) 
                 songs: [],
                 volume: 5, 
                 playing: true,
+                timer: null,
             };
 
             queue[guildId].songs.push(song);
@@ -50,9 +55,10 @@ async function addSong(link, queue, config, voiceChannel, guildId, textChannel) 
             }
         } else {
             queue[guildId].songs.push(song);
+            if (queue[guildId].timer) {
+                playSong(queue, guildId);
+            }
         }
-
-        return song.title;
     }
 }
 
@@ -86,8 +92,8 @@ class MusicModule {
                     return;
                 });
             } else {
-                const title = addSong(args[1], this.queue, this.config, voiceChannel, guildId, textChannel);
-                textChannel.send(`${title} added to queue!`);
+                addSong(args[1], this.queue, this.config, voiceChannel, guildId, textChannel);
+                textChannel.send(`Song added to queue!`);
             }
         });
 
@@ -123,7 +129,7 @@ class MusicModule {
             serverQueue.connection.dispatcher.end();
         });
 
-        this.dispatch.hook('$end', message => {
+        this.dispatch.hook('$disconnect', message => {
             const guildId = message.guild.id;
             if(message.member.voiceChannel && this.queue[guildId]) {
                 this.queue[guildId].songs = [];
@@ -157,7 +163,7 @@ class MusicModule {
 
         this.dispatch.hook('$resume', message => {
             const guildId = message.guild.id;
-            if (this.queue[guildId].playing || !this.queue[guildId].songs[0]) return message.channel.send('I don\'t have anything to resume right now.');
+            if (this.queue[guildId].playing && !this.queue[guildId].songs[0]) return message.channel.send('I don\'t have anything to resume right now.');
             this.queue[guildId].playing = true;
             this.queue[guildId].connection.dispatcher.resume();
             message.channel.send('Resuming song.');
