@@ -6,21 +6,25 @@ const ytpl = require('ytpl');
 
 async function playSong(queue, guildId) {
     clearTimeout(queue[guildId].timer);
+    queue[guildId].timer = null;
     const song = queue[guildId].songs[0];
     if (!song) {
         queue[guildId].playing = false;
         queue[guildId].timer = setTimeout(() => {
             queue[guildId].voiceChannel.leave();
-            delete queue[guildId];
+            if (queue[guildId]) {
+                delete queue[guildId];
+            }
         }, 600000);
         return;
     }
 
+    queue[guildId].playing = true;
     const dispatcher = queue[guildId].connection.playStream(await song.getSong())
         .on('end', () => {
-            console.log('music ended')
+            queue[guildId].lastSong = queue[guildId].songs[0];
+            console.log('music ended');
             queue[guildId].songs.shift();
-            console.log(`starting song ${queue[guildId].songs[0]}`)
             playSong(queue, guildId);
         })
         .on('error', () => {
@@ -42,6 +46,7 @@ async function addSong(link, queue, config, voiceChannel, guildId, textChannel) 
                 volume: 5, 
                 playing: true,
                 timer: null,
+                lastSong: null,
             };
 
             queue[guildId].songs.push(song);
@@ -56,6 +61,7 @@ async function addSong(link, queue, config, voiceChannel, guildId, textChannel) 
         } else {
             queue[guildId].songs.push(song);
             if (queue[guildId].timer) {
+                console.log('i am here')
                 playSong(queue, guildId);
             }
         }
@@ -97,6 +103,55 @@ class MusicModule {
             }
         });
 
+        this.dispatch.hook('$replay', message => {
+            const voiceChannel = message.member.voiceChannel;
+            const guildId = message.guild.id;
+            const textChannel = message.channel;
+            if (!voiceChannel) return textChannel.send('You need to be in a voice channel to replay songs!');
+            const permissions = voiceChannel.permissionsFor(this.client.user);
+            if (!permissions.has('CONNECT') || !permissions.has('SPEAK')) return message.channel.send('I do not have the permissions to join that voice channel and play music!');
+            if (!this.queue[guildId]) return textChannel.send('Nothing to replay!');
+            if (!this.queue[guildId].lastSong) return textChannel.send('Nothing to replay!');
+
+            const replaySong = this.queue[guildId].lastSong;
+            if (this.queue[guildId].playing) {
+                this.queue[guildId].songs.splice(1, 0, replaySong);
+                return textChannel.send('I will replay the previous song after the current song finishes!');
+            }
+            this.queue[guildId].songs = [replaySong, ...this.queue[guildId].songs];
+            playSong(this.queue, guildId);
+            return textChannel.send('Playing previous song!');
+        });
+
+        this.dispatch.hook('$summon', async message => {
+            const voiceChannel = message.member.voiceChannel;
+            const guildId = message.guild.id;
+            const textChannel = message.channel;
+            if (!voiceChannel) return textChannel.send('You need to be in a voice channel to summon me!');
+            if (this.queue[guildId]) return textChannel.send('I\'m already in a channel! I can\'t join another.');
+            this.queue[guildId] = {
+                textChannel,
+                voiceChannel,
+                connection: null,
+                songs: [],
+                volume: 5, 
+                playing: false,
+                timer: setTimeout(() => {
+                    this.queue[guildId].voiceChannel.leave();
+                    if (queue[guildId]) {
+                        delete queue[guildId];
+                    }
+                    }, 600000),
+                lastSong: null,
+            };
+            try {
+                let connection = await voiceChannel.join();
+                this.queue[guildId].connection = connection;
+            } catch (err) {
+                console.log(err);
+            }
+        });
+
         this.dispatch.hook(null, async message => {
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
@@ -124,16 +179,25 @@ class MusicModule {
         this.dispatch.hook('$skip', message => {
             const serverQueue = this.queue[message.guild.id];
             const voiceChannel = message.member.voiceChannel;
+            const guildId = message.guild.id;
             if (!voiceChannel) return message.channel.send('You need to be in a voice channel to skip!');
             if (!serverQueue) return message.channel.send('W-what am I supposed to skip?');
+            if (!serverQueue.songs[0]) return message.channel.send('I can\'t skip if I\'m not playing anything...');
             serverQueue.connection.dispatcher.end();
         });
 
         this.dispatch.hook('$disconnect', message => {
             const guildId = message.guild.id;
             if(message.member.voiceChannel && this.queue[guildId]) {
-                this.queue[guildId].songs = [];
-                this.queue[guildId].connection.dispatcher.end();
+                if (this.queue[guildId]) {
+                    this.queue[guildId].songs = [];
+                }
+                if (this.queue.connection) {
+                    this.queue[guildId].connection.dispatcher.end();
+                }
+                if (this.queue[guildId].voiceChannel) {
+                    this.queue[guildId].voiceChannel.leave();
+                }  
             }
         });
 
