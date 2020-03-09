@@ -10,7 +10,8 @@ class YouTube {
     }
 
     async obtainSong(link, config) {
-        const songInfo = await ytdl.getInfo(link);
+        const songInfo = await ytdl.getInfo(link).catch(err => false);
+        if (!songInfo) return false;
         const response = songInfo.player_response.videoDetails;
         return new Song(
             Discord.Util.escapeMarkdown(songInfo.title),
