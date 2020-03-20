@@ -24,7 +24,9 @@ async function playSong(queue, guildId) {
     queue[guildId].playing = true;
     const dispatcher = queue[guildId].connection.playStream(await song.getSong())
         .on('end', () => {
-            queue[guildId].songs.shift();
+            if (!queue[guildId].loop) {
+                queue[guildId].songs.shift();
+            }
             playSong(queue, guildId);
         })
         .on('error', (error) => {
@@ -47,6 +49,7 @@ async function addSong(link, queue, config, voiceChannel, guildId, textChannel) 
                 timer: null,
                 lastSong: null,
                 paused: false,
+                loop: false,
             };
 
             queue[guildId].songs.push(song);
@@ -65,6 +68,7 @@ async function addSong(link, queue, config, voiceChannel, guildId, textChannel) 
                 playSong(queue, guildId);
             }
         }
+        return song;
     }
 }
 
@@ -73,9 +77,9 @@ class MusicModule {
         this.dispatch = context.dispatch;
         this.config = context.config;
         this.client = context.client;
-        this.searcher = null;
+        this.searchMessages = {};
         this.queue = {};
-        this.searchResults = [];
+        this.searchResults = {};
 
         this.dispatch.hook('$play', async message => {
             const args = message.content.split(' ');
@@ -101,8 +105,8 @@ class MusicModule {
                         return;
                     });
                 } else {
-                    addSong(args[1], this.queue, this.config, voiceChannel, guildId, textChannel);
-                    textChannel.send(`Song added to queue!`);
+                    const addedSong = await addSong(args[1], this.queue, this.config, voiceChannel, guildId, textChannel);
+                    textChannel.send(`Added ${addedSong.getTitle()} to queue!`);
                 }
             } catch (_) {
                 const searchTerms = message.content.substring('$search'.length, message.length).trim();
@@ -194,6 +198,7 @@ class MusicModule {
                     }, 600000),
                 lastSong: null,
                 paused: false,
+                loop: false,
             };
             try {
                 let connection = await voiceChannel.join();
@@ -205,27 +210,33 @@ class MusicModule {
 
         this.dispatch.hook(null, async message => {
             const voiceChannel = message.member.voiceChannel;
+            const author = message.author.id;
             const guildId = message.guild.id;
             const textChannel = message.channel;
-            if (!this.searcher) {
+            if (this.searchResults[author] === [] || this.searchResults[author] === undefined) {
+                return;
+            }
+            if (!voiceChannel) {
                 return;
             }
 
-            if (message.author.id === this.searcher) {
-                if (!voiceChannel) return textChannel.send('You need to be in a voice channel to add songs!');
-                const selection = message.content;
-                if (selection.match(/[1-9]|10/)) {
-                    const index = parseInt(selection, 10);
-                    if (index > this.searchResults.length) {
-                        message.channel.send('That song doesn\'t exist!');
-                        return;
-                    }
-                    addSong(this.searchResults[index-1].url, this.queue, this.config, voiceChannel, guildId, textChannel);
-                    message.channel.send('Song added!');
-                    this.searcher = null;
-                    this.searchResults = [];
+            const selection = message.content;
+            const options = this.searchResults[author];
+            if (selection.match(/[1-9]|10/)) {
+                const index = parseInt(selection, 10);
+                if (index > options.length) {
+                    message.channel.send('That song doesn\'t exist!');
+                    return;
                 }
+                const addedSong = await addSong(options[index-1].url, this.queue, this.config, voiceChannel, guildId, textChannel);
+                message.channel.send(`${addedSong.getTitle()} added to queue!`);
+                if (this.searchMessages[author]) {
+                    this.searchMessages[author].delete();
+                    this.searchMessages[author] = null;
+                }
+                this.searchResults[author] = [];
             }
+            
         });
 
         this.dispatch.hook('$skip', message => {
@@ -235,6 +246,9 @@ class MusicModule {
             if (!voiceChannel) return message.channel.send('You need to be in a voice channel to skip!');
             if (!serverQueue) return message.channel.send('W-what am I supposed to skip?');
             if (!serverQueue.songs[0]) return message.channel.send('I can\'t skip if I\'m not playing anything...');
+            if (serverQueue.loop) {
+                serverQueue.loop = false;
+            }
             serverQueue.connection.dispatcher.end();
         });
 
@@ -288,21 +302,51 @@ class MusicModule {
         });
 
         this.dispatch.hook('$search', async message => {
-            this.searchResults = [];
+            const author = message.author.id;
+            this.searchResults[author] = [];
             const searchTerms = message.content.substring('$search'.length, message.length).trim();
             const { videos } = await yts(searchTerms);
             const videoNum = videos.length > 10 ? 10 : videos.length;
-            this.searcher = message.author.id;
-            let entries = '';
+            let entries = `> [${message.author.username}'s search results!]\n> **Type in the corresponding number to queue your song!**\n`;
             for (let i = 0; i < videoNum; i++) {
-                this.searchResults.push(videos[i]);
-                entries += (`${i+1}) ${videos[i].title} [${videos[i].timestamp}] | ${videos[i].author.name}\n`);
+                this.searchResults[author].push(videos[i]);
+                entries += (`> \`${i+1}.\` ${videos[i].author.name} - ${videos[i].title} [${videos[i].timestamp}]\n`);
+            }
+            
+            message.channel.send(entries).then(response => {
+                this.searchMessages[author] = response;
+            });
+        });
+
+        this.dispatch.hook('$cancel', message => {
+            const author = message.author.id;
+            if (!this.searchResults[author]) {
+                return message.channel.send('You have no pending search!');
             }
 
-            const searchEmbed = new Discord.RichEmbed()
-                .setTitle(`${searchTerms} results\nType in the number to select your desired song!`)
-                .setDescription(entries);
-            message.channel.send(searchEmbed);
+            this.searchResults[author] = [];
+            if (this.searchMessages[author]) {
+                this.searchMessages[author].delete();
+                this.searchMessages[author] = null;
+            }
+            message.channel.send('Search cleared!');
+        });
+
+        this.dispatch.hook('$loop', message => {
+            const guildId = message.guild.id;
+            if (!this.queue[guildId]) {
+                return message.channel.send('I can\'t loop a song when I\'m not even active!');
+            }
+            if (!this.queue[guildId].songs[0]) {
+                return message.channel.send('I can\'t loop a song when I\'ve got nothing to play!');
+            }
+
+            if (!this.queue[guildId].loop) {
+                this.queue[guildId].loop = true;
+                return message.channel.send('I\'ll loop the current song!');
+            }
+            this.queue[guildId].loop = false;
+            message.channel.send('I\'ll stop looping now!');      
         });
 
         this.dispatch.hook('$queue', message => {
@@ -310,7 +354,8 @@ class MusicModule {
             const songs = this.queue[guildId].songs;
             let msg = ``;
             for (let i = 0; i < songs.length; i++) {
-                msg += `${i + 1}) ${songs[i].getTitle()}\n`;
+                const info = songs[i].getInfo();
+                msg += `> \`${i + 1}\` ${info.author} - ${songs[i].getTitle()}\n`;
             }
             if (!msg) {
                return message.channel.send('Nothing is queued!');
