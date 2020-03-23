@@ -146,6 +146,12 @@ class MusicModule {
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
             const textChannel = message.channel;
+            const modIds = this.config.get('moderator-ids');
+            for (const modId of modIds) {
+                if (!message.member.roles.has(modId)) {
+                    return message.channel.send('You must be a mod to use that command!');
+                }
+            }
             if (!voiceChannel) return textChannel.send('You need to be in a voice channel modify volume!');
             if (!this.queue[guildId]) return textChannel.send('I\'m not playing anything to set volume on!');
             if (isNaN(args[1]) || args[1] > 10 || args[1] < 1) {
@@ -349,6 +355,33 @@ class MusicModule {
             message.channel.send('I\'ll stop looping now!');      
         });
 
+        this.dispatch.hook('$commands', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (voiceText.includes(message.channel.id)) {
+                const settingsList = `
+                    \`\`\`\nIris Music Bot Commands
+                    \n$play - Use with a youtube or soundcloud link to play a song from those sites, may also use search terms for youtube. (such as $play hot cross buns). Also compatible with Youtube playlists.
+                    \n$search - Will search youtube with the given query, printing out the first 10 results. To add a song from those results, just type in the corresponding number.
+                    \n$cancel - Cancels a current search.
+                    \n$clear - Clears out all the songs currently in the queue.
+                    \n$volume - Mods only, allows the moderators to adjust the volume level of the bot from a scale of 1-10. 5 is default.
+                    \n$replay - Replays the song currently playing after it finishes.
+                    \n$loop - Will loop the current song repeatedly until it is toggled off with another $loop call or with a $skip.
+                    \n$skip - Will skip the current song or end a loop.
+                    \n$np - Shows information on the song currently playing.
+                    \n$queue - Shows all songs currently in the queue.
+                    \n$pause - Pauses the current song.
+                    \n$resume - Resumes a paused song.
+                    \n$summon - Will call Iris into your current voice channel.
+                    \n$disconnect - Will disconnect Iris from the current voice channel.
+                    \n$move - Allows you to move songs around in the queue. $move 3 2 would move the third song to the second position.
+                    \n$commands - Shows the commands, of course! How else are you seeing this...\`\`\`
+                `;
+
+                message.channel.send(settingsList)
+            }
+        });
+
         this.dispatch.hook('$queue', message => {
             const guildId = message.guild.id;
             const songs = this.queue[guildId].songs;
@@ -361,6 +394,26 @@ class MusicModule {
                return message.channel.send('Nothing is queued!');
             }
             message.channel.send(msg);
+        });
+
+        this.dispatch.hook('$move', message => {
+            const guildId = message.guild.id;
+            const songs = this.queue[guildId].songs;
+            const trimmedMessage = message.content.substring('$move'.length, message.length).trim();
+            const indexes = trimmedMessage.split(' ');
+            const fromIndex = parseInt(indexes[0], 10);
+            const toIndex = parseInt(indexes[1], 10);
+            if (fromIndex === NaN || toIndex === NaN) {
+                return message.channel.send('Incorrect format! If you want to move a queue item make sure you do it like this! `$move 4 2` to move the fourth item to the second spot!');
+            }
+
+            if (fromIndex - 1 === 0 || toIndex - 1 === 0) return message.channel.send('You can\'t move a song that is currently playing, or move a song into the now playing spot!');
+            if (fromIndex > songs.length || fromIndex < 1) return message.channel.send('You can\'t move a song that doesn\'t exist...');
+            if (toIndex > songs.length || toIndex < 1) return message.channel.send('You can\'t move a song outside of the queue...');
+
+            songs.splice(toIndex - 1, 0, songs.splice(fromIndex - 1, 1)[0]);
+
+            message.channel.send(`Moved the song from the ${fromIndex} position to position ${toIndex}!`);
         });
     }
 }
