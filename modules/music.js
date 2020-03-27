@@ -3,7 +3,13 @@ const findSource = require('../findSource.js');
 const yts = require('yt-search');
 const ytpl = require('ytpl');
 
-
+function checkMod(modIds, member) {
+    for (const modId of modIds) {
+        if (member.roles.has(modId)) {
+            return true;
+        }
+    }
+}
 async function playSong(queue, guildId) {
     clearTimeout(queue[guildId].timer);
     queue[guildId].timer = null;
@@ -82,10 +88,19 @@ class MusicModule {
         this.searchResults = {};
 
         this.dispatch.hook('$play', async message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const args = message.content.split(' ');
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
             const textChannel = message.channel;
+            if (message.content === '$play' && !this.queue[guildId].playing && this.queue[guildId].paused) {
+                this.queue[guildId].playing = true;
+                this.queue[guildId].paused = false;
+                this.queue[guildId].connection.dispatcher.resume();
+                return message.channel.send('Resuming song.');
+            }
             if (!voiceChannel) return textChannel.send('You need to be in a voice channel to add songs!');
             const permissions = voiceChannel.permissionsFor(this.client.user);
             if (!permissions.has('CONNECT') || !permissions.has('SPEAK')) return message.channel.send('I do not have the permissions to join that voice channel and play music!');
@@ -124,14 +139,21 @@ class MusicModule {
                 if (!videos[0]) {
                     return textChannel.send('No results found...');
                 }
-                textChannel.send(`Adding ${videos[0].title} to the queue!`);
+                const playingEmbed = new Discord.RichEmbed()
+                    .setAuthor(this.client.user.username, `https://cdn.discordapp.com/avatars/${this.client.user.id}/${this.client.user.avatar}.jpg`)
+                    .setTitle(videos[0].author.name)
+                    .setDescription(`Adding [${videos[0].title}](${videos[0].url}) to the queue!`)
+                    .setThumbnail(videos[0].thumbnail)
+                textChannel.send(playingEmbed);
                 addSong(videos[0].url, this.queue, this.config, voiceChannel, guildId, textChannel);
             }
 
         });
 
         this.dispatch.hook('$clear', message => {
-            const args = message.content.split(' ');
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
             const textChannel = message.channel;
@@ -142,15 +164,17 @@ class MusicModule {
 
         });
         this.dispatch.hook('$volume', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const args = message.content.split(' ');
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
             const textChannel = message.channel;
             const modIds = this.config.get('moderator-ids');
-            for (const modId of modIds) {
-                if (!message.member.roles.has(modId)) {
-                    return message.channel.send('You must be a mod to use that command!');
-                }
+            const isMod = checkMod(modIds, message.member);
+            if (!isMod) {
+                return message.channel.send('You must be a mod to use that command!');
             }
             if (!voiceChannel) return textChannel.send('You need to be in a voice channel modify volume!');
             if (!this.queue[guildId]) return textChannel.send('I\'m not playing anything to set volume on!');
@@ -164,6 +188,9 @@ class MusicModule {
         });
 
         this.dispatch.hook('$replay', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
             const textChannel = message.channel;
@@ -184,9 +211,17 @@ class MusicModule {
         });
 
         this.dispatch.hook('$summon', async message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const voiceChannel = message.member.voiceChannel;
             const guildId = message.guild.id;
             const textChannel = message.channel;
+            const modIds = this.config.get('moderator-ids');
+            const isMod = checkMod(modIds, message.member);
+            if (!isMod) {
+                return message.channel.send('You must be a mod to use that command!');
+            }
             if (!voiceChannel) return textChannel.send('You need to be in a voice channel to summon me!');
             if (this.queue[guildId]) return textChannel.send('I\'m already in a channel! I can\'t join another.');
             this.queue[guildId] = {
@@ -215,11 +250,14 @@ class MusicModule {
         });
 
         this.dispatch.hook(null, async message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const voiceChannel = message.member.voiceChannel;
             const author = message.author.id;
             const guildId = message.guild.id;
             const textChannel = message.channel;
-            if (this.searchResults[author] === [] || this.searchResults[author] === undefined) {
+            if (!this.searchResults[author] || this.searchResults[author].length === 0) {
                 return;
             }
             if (!voiceChannel) {
@@ -228,14 +266,22 @@ class MusicModule {
 
             const selection = message.content;
             const options = this.searchResults[author];
-            if (selection.match(/[1-9]|10/)) {
+            if (selection.match(/^([1-9]|10)*$/)) {
                 const index = parseInt(selection, 10);
                 if (index > options.length) {
                     message.channel.send('That song doesn\'t exist!');
                     return;
                 }
                 const addedSong = await addSong(options[index-1].url, this.queue, this.config, voiceChannel, guildId, textChannel);
-                message.channel.send(`${addedSong.getTitle()} added to queue!`);
+                const info = addedSong.getInfo();
+                const url = addedSong.getUrl();
+                const playingEmbed = new Discord.RichEmbed()
+                    .setAuthor(this.client.user.username, `https://cdn.discordapp.com/avatars/${this.client.user.id}/${this.client.user.avatar}.jpg`)
+                    .setTitle(info.author)
+                    .setDescription(`Adding [${addedSong.getTitle()}](${url}) to the queue!`)
+                    .setThumbnail(info.thumbnail)
+
+                message.channel.send(playingEmbed);
                 if (this.searchMessages[author]) {
                     this.searchMessages[author].delete();
                     this.searchMessages[author] = null;
@@ -246,9 +292,13 @@ class MusicModule {
         });
 
         this.dispatch.hook('$skip', message => {
-            const serverQueue = this.queue[message.guild.id];
-            const voiceChannel = message.member.voiceChannel;
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const guildId = message.guild.id;
+            const serverQueue = this.queue[guildId];
+            const voiceChannel = message.member.voiceChannel;
+            
             if (!voiceChannel) return message.channel.send('You need to be in a voice channel to skip!');
             if (!serverQueue) return message.channel.send('W-what am I supposed to skip?');
             if (!serverQueue.songs[0]) return message.channel.send('I can\'t skip if I\'m not playing anything...');
@@ -259,8 +309,16 @@ class MusicModule {
         });
 
         this.dispatch.hook('$disconnect', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const guildId = message.guild.id;
             if(message.member.voiceChannel && this.queue[guildId]) {
+                const modIds = this.config.get('moderator-ids');
+                const isMod = checkMod(modIds, message.member);
+                if (!isMod) {
+                    return message.channel.send('You must be a mod to use that command!');
+                }
                 if (this.queue[guildId]) {
                     this.queue[guildId].songs = [];
                 }
@@ -275,21 +333,27 @@ class MusicModule {
         });
 
         this.dispatch.hook('$np', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const guildId = message.guild.id;
             const np = this.queue[guildId].songs[0];
             if (np) {
                 const info = np.getInfo();
                 const url = np.getUrl();
                 const npEmbed = new Discord.RichEmbed()
-                    .setTitle(np.getTitle())
-                    .setURL(url)
+                    .setAuthor(this.client.user.username, `https://cdn.discordapp.com/avatars/${this.client.user.id}/${this.client.user.avatar}.jpg`)
+                    .setTitle(info.author)
+                    .setDescription(`[${np.getTitle()}](${url})`)
                     .setThumbnail(info.thumbnail)
-                    .setAuthor(info.author);
                 message.channel.send(npEmbed);
             }
         });
 
         this.dispatch.hook('$pause', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const guildId = message.guild.id;
             if (!this.queue[guildId].playing) return message.channel.send('There is nothing playing for me to pause!');
             this.queue[guildId].playing = false;
@@ -299,6 +363,9 @@ class MusicModule {
         });
 
         this.dispatch.hook('$resume', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const guildId = message.guild.id;
             if (this.queue[guildId].playing && !this.queue[guildId].songs[0]) return message.channel.send('I don\'t have anything to resume right now.');
             this.queue[guildId].playing = true;
@@ -308,23 +375,36 @@ class MusicModule {
         });
 
         this.dispatch.hook('$search', async message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const author = message.author.id;
+            const avatar = message.author.avatar;
+            const userName = message.author.username;
             this.searchResults[author] = [];
             const searchTerms = message.content.substring('$search'.length, message.length).trim();
             const { videos } = await yts(searchTerms);
             const videoNum = videos.length > 10 ? 10 : videos.length;
-            let entries = `> [${message.author.username}'s search results!]\n> **Type in the corresponding number to queue your song!**\n`;
+            const entriesTitle = `**Type in the corresponding number to queue your song!**\n`;
+            let entries = '';
             for (let i = 0; i < videoNum; i++) {
                 this.searchResults[author].push(videos[i]);
-                entries += (`> \`${i+1}.\` ${videos[i].author.name} - ${videos[i].title} [${videos[i].timestamp}]\n`);
+                entries += (`**${i+1}**. ${videos[i].author.name} - ${videos[i].title} [${videos[i].timestamp}]\n`);
             }
+            const searchEmbed = new Discord.RichEmbed()
+                .setTitle(entriesTitle)
+                .setAuthor(userName, `https://cdn.discordapp.com/avatars/${author}/${avatar}.jpg`)
+                .setDescription(entries)
             
-            message.channel.send(entries).then(response => {
+            message.channel.send(searchEmbed).then(response => {
                 this.searchMessages[author] = response;
             });
         });
 
         this.dispatch.hook('$cancel', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const author = message.author.id;
             if (!this.searchResults[author]) {
                 return message.channel.send('You have no pending search!');
@@ -335,10 +415,15 @@ class MusicModule {
                 this.searchMessages[author].delete();
                 this.searchMessages[author] = null;
             }
-            message.channel.send('Search cleared!');
+            message.channel.send('Search canceled!').then(msg => {
+                msg.delete(30000);
+            });
         });
 
         this.dispatch.hook('$loop', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const guildId = message.guild.id;
             if (!this.queue[guildId]) {
                 return message.channel.send('I can\'t loop a song when I\'m not even active!');
@@ -357,46 +442,58 @@ class MusicModule {
 
         this.dispatch.hook('$commands', message => {
             const voiceText = this.config.get('voice-text-channels');
-            if (voiceText.includes(message.channel.id)) {
-                const settingsList = `
-                    \`\`\`\nIris Music Bot Commands
-                    \n$play - Use with a youtube or soundcloud link to play a song from those sites, may also use search terms for youtube. (such as $play hot cross buns). Also compatible with Youtube playlists.
-                    \n$search - Will search youtube with the given query, printing out the first 10 results. To add a song from those results, just type in the corresponding number.
-                    \n$cancel - Cancels a current search.
-                    \n$clear - Clears out all the songs currently in the queue.
-                    \n$volume - Mods only, allows the moderators to adjust the volume level of the bot from a scale of 1-10. 5 is default.
-                    \n$replay - Replays the song currently playing after it finishes.
-                    \n$loop - Will loop the current song repeatedly until it is toggled off with another $loop call or with a $skip.
-                    \n$skip - Will skip the current song or end a loop.
-                    \n$np - Shows information on the song currently playing.
-                    \n$queue - Shows all songs currently in the queue.
-                    \n$pause - Pauses the current song.
-                    \n$resume - Resumes a paused song.
-                    \n$summon - Will call Iris into your current voice channel.
-                    \n$disconnect - Will disconnect Iris from the current voice channel.
-                    \n$move - Allows you to move songs around in the queue. $move 3 2 would move the third song to the second position.
-                    \n$commands - Shows the commands, of course! How else are you seeing this...\`\`\`
-                `;
+            if (!voiceText.includes(message.channel.id)) return;
 
-                message.channel.send(settingsList)
-            }
+            const settingsList = `
+                **$play** - Play a Youtube or Soundcloud link (individual or yt playlist links). Can be used to search: ($play plastic love).
+                \n**$search** - Gives 10 results from Youtube based search query [$search plastic love]. To pick from those results, just type in the corresponding number.
+                \n**$cancel** - Cancels a current search.
+                \n**$clear** - Clears out everything from the current queue.
+                \n**$volume** - Adjusts the volume level of the bot on a scale of 1-10, 5 being default. ✦
+                \n**$replay** - Replays the song currently playing. 
+                \n**$loop** - Loops the current song. 
+                \n**$skip** - Will skip the current song and end a loop.
+                \n**$np** - Shows information on the song currently playing.
+                \n**$queue** - Shows all songs currently in the queue.
+                \n**$pause** - Pauses the current song.
+                \n**$summon** - Will call Iris into your current voice channel. ✦
+                \n**$disconnect** - Will disconnect Iris from the current voice channel. ✦
+                \n**$move** - Allows you to move songs around in the queue. [$move 3 2 would move the third song to the second position.]
+                \n**$commands** - Shows the commands, of course! How else are you seeing this...
+                \n✦ - Moderators only.
+            `;
+
+            const commandsEmbed = new Discord.RichEmbed()
+                .setTitle('Iris\'s Music Command List')
+                .setDescription(settingsList)
+
+            message.channel.send(commandsEmbed)
         });
 
         this.dispatch.hook('$queue', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const guildId = message.guild.id;
             const songs = this.queue[guildId].songs;
             let msg = ``;
             for (let i = 0; i < songs.length; i++) {
                 const info = songs[i].getInfo();
-                msg += `> \`${i + 1}\` ${info.author} - ${songs[i].getTitle()}\n`;
+                msg += `**${i + 1}**. ${info.author} - ${songs[i].getTitle()}\n`;
             }
             if (!msg) {
                return message.channel.send('Nothing is queued!');
             }
-            message.channel.send(msg);
+            const queueEmbed = new Discord.RichEmbed()
+                .setAuthor(userName, `https://cdn.discordapp.com/avatars/${author}/${avatar}.jpg`)
+                .setDescription(msg)
+            message.channel.send(queueEmbed);
         });
 
         this.dispatch.hook('$move', message => {
+            const voiceText = this.config.get('voice-text-channels');
+            if (!voiceText.includes(message.channel.id)) return;
+
             const guildId = message.guild.id;
             const songs = this.queue[guildId].songs;
             const trimmedMessage = message.content.substring('$move'.length, message.length).trim();
